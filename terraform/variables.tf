@@ -31,3 +31,15 @@ variable "enable_nat" {
   type        = bool
   default     = false
 }
+
+variable "ssh_user" {
+  description = "Linux user created on both VMs for SSH"
+  type        = string
+  default     = "fde"
+}
+
+variable "ssh_public_key_path" {
+  description = "Public key allowed to log in (the private half never leaves the laptop)"
+  type        = string
+  default     = "~/.ssh/airis.pub"
+}
