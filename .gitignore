@@ -1,0 +1,7 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+kubeconfig*
+__pycache__/
+.terraform.lock.hcl
