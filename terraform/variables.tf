@@ -24,5 +24,10 @@ variable "subnet_cidr" {
 variable "mngmt_cidr" {
   description = "IP range of the management subnet"
   type        = string
-  default     = "10.10.1.0/24"
+}
+
+variable "enable_nat" {
+  description = "Outbound internet for the private subnet. true during bootstrap, false afterwards for zero egress."
+  type        = bool
+  default     = false
 }
