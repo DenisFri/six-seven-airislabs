@@ -13,8 +13,8 @@ Status: `done` · `in progress` · `next` · `todo`
 | 4 | Firewall: admin → bastion (22), bastion → k3s (22, 6443) | done | applied |
 | 5 | Cloud Router + Cloud NAT as `enable_nat` toggle | done | applied, index 0 |
 | 6 | Bastion VM + outputs + first SSH login | done | `whoami` = fde (2026-10-13); `block-project-ssh-keys` apply + pins commit carried into 7 |
-| 7 | K3s VM (no public IP) + `k3s_private_ip` output + SSH config with ProxyJump | in progress | `ssh six-seven-k3s` works through the bastion |
-| 8 | Bastion tooling via startup script: kubectl, helm, python3, pip, psycopg, cnpg plugin | todo | `kubectl version --client` on the bastion |
+| 7 | K3s VM (no public IP) + `k3s_private_ip` output + SSH config with ProxyJump | done | `ssh six-seven-k3s` → hostname + NAT IP `34.165.222.20` (2026-10-13) |
+| 8 | Bastion tooling via startup script: kubectl, helm, python3, pip, psycopg, cnpg plugin | in progress | `kubectl version --client` on the bastion |
 | 9 | K3s install over `ssh -J` + kubeconfig on the bastion | todo | `kubectl get nodes` Ready from the bastion |
 | 10 | Helm + CNPG operator in `cnpg-system` | todo | operator pod Running |
 | 11 | Postgres `Cluster` `airis-core`, 2 instances | todo | `Cluster in healthy state` |
@@ -31,5 +31,5 @@ Status: `done` · `in progress` · `next` · `todo`
 
 ## Open items
 
-- Carried from Step 6 into Step 7: apply `block-project-ssh-keys` (1 to change), commit version pins + `.gitignore`, add `description` to `bastion_private_ip`
+- Carried into Step 8: commit `k3s.tf` + `outputs.tf`, add `description` to `bastion_private_ip`
 - Interview date: not set yet. Once known, lay out the day-by-day schedule.

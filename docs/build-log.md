@@ -450,6 +450,107 @@ Commit: `git commit -m "terraform: bastion vm"` → done as `added bastion vm`
 
 Bastion and NAT were left running overnight 2026-10-12 → 13 (no destroy). End every session with `/teardown`.
 
+## Step 7 — K3s VM (no public IP) + SSH ProxyJump
+
+Goal: the private VM, reachable only through the bastion, and one SSH command from the laptop that gets there without the private key ever leaving the laptop.
+
+Why `e2-standard-2` (2 vCPU, 8 GB): k3s ~1 GB + CNPG operator + two Postgres instances with explicit memory requests. `e2-medium` (4 GB) ends in OOMKilled. Disk 20 GB: k3s binaries, images and Postgres data (`local-path`) all live on it.
+
+`k3s.tf` — same pattern as the bastion, two differences: no `access_config`, bigger machine:
+```hcl
+# Same pattern as the bastion host, but for the k3s cluster. (No public IP)
+# Bigger machine type: k3s + CNPG operator + two Postgres pods (>= 4 GB)
+resource "google_service_account" "k3s" {
+  account_id   = "six-seven-k3s"
+  display_name = "K3s VM"
+}
+
+resource "google_compute_instance" "k3s" {
+  name         = "six-seven-k3s"
+  machine_type = "e2-standard-2"
+  zone         = var.zone
+  tags         = ["k3s"]
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+      size  = 20
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.private.id
+    # No access_config: no public IP. In only through the bastion. Out only through NAT.
+  }
+
+  metadata = {
+    ssh-keys               = "${var.ssh_user}:${trimspace(file(pathexpand(var.ssh_public_key_path)))}"
+    block-project-ssh-keys = "true"
+  }
+
+  shielded_instance_config {
+    enable_secure_boot          = true
+    enable_vtpm                 = true
+    enable_integrity_monitoring = true
+  }
+
+  service_account {
+    email  = google_service_account.k3s.email
+    scopes = ["https://www.googleapis.com/auth/logging.write", "https://www.googleapis.com/auth/monitoring.write"]
+  }
+}
+```
+
+`outputs.tf` add:
+```hcl
+output "k3s_private_ip" {
+  description = "K3s node; reachable only through the bastion"
+  value       = google_compute_instance.k3s.network_interface[0].network_ip
+}
+```
+
+Commands: `terraform fmt; terraform validate; terraform plan` → **2 to add, 1 to change** (SA + VM, plus the Step 6 metadata change) → `apply` → `terraform output -raw k3s_private_ip` → `10.10.0.3`.
+
+`C:\Users\denis\.ssh\config`:
+```
+Host six-seven-bastion
+  HostName 34.165.78.24
+  User fde
+  IdentityFile ~/.ssh/airis
+  IdentitiesOnly yes
+
+Host six-seven-k3s
+  HostName 10.10.0.3
+  User fde
+  IdentityFile ~/.ssh/airis
+  IdentitiesOnly yes
+  ProxyJump six-seven-bastion
+```
+
+How ProxyJump works: ssh connects to the bastion, asks it to open a plain TCP tunnel to `10.10.0.3:22`, then runs the *second* SSH handshake through that tunnel, from the laptop. The bastion forwards encrypted bytes and never sees the key. Alternatives: agent forwarding (`-A`) lets a compromised bastion use your key while you are connected; copying the private key to the bastion: never.
+
+Passphrase + ProxyJump = two prompts per login. Fix: Windows ssh-agent (service is Disabled by default; admin PowerShell, once): `Set-Service ssh-agent -StartupType Automatic; Start-Service ssh-agent; ssh-add $HOME\.ssh\airis`
+
+Verify: `ssh six-seven-k3s "hostname; curl -s -m 5 ifconfig.me"` → `six-seven-k3s` + NAT IP `34.165.222.20` (≠ bastion `34.165.78.24`). One line proves both claims: in only via the bastion, out only via NAT.
+
+| What breaks | Cause |
+|---|---|
+| hop 2: connection timed out | VM missing tag `k3s`, or the bastion→k3s rule without `source_tags` |
+| hop 2: Permission denied (publickey) | `ssh` run without the config, so no key offered on the second hop |
+| `curl` hangs | NAT off, or in another region than the subnet |
+| config ignored | saved as `config.txt`, or `Host` typo |
+| `ZONE_RESOURCE_POOL_EXHAUSTED` | no `e2-standard-2` free in the zone; switch the zone letter |
+
+**"Suitable for future HA expansion?" (asked 2026-10-13):** HA lives in CNPG today (2 instances, automatic failover, *preferred* anti-affinity). The platform is one node, one zone, on purpose. Path, no teardown: add a worker (`K3S_URL` + token; the replica moves there by itself) → `k3s → k3s` firewall rule (6443, 2379-2380, 10250 tcp, 8472 udp; today nodes never talk to each other) → zones as a list variable (the subnet is regional) → control plane: SQLite → embedded etcd in place with `--cluster-init`, then 3 servers → optional CSI driver for node-independent disks. What would have blocked it: Postgres straight on the VM, NodePort/hostPath tied to one node, the default network.
+
+Commit: `git add terraform/ ; git commit -m "terraform: k3s vm, ssh proxyjump"`
+
+- [x] plan → 2 to add, 1 to change; applied (`plan` now: No changes)
+- [x] `ssh six-seven-k3s` → `six-seven-k3s`, `34.165.222.20` (2026-10-13)
+- [x] Step 6 leftovers committed (`9812fc8`)
+- [ ] `k3s.tf` + `outputs.tf` committed
+- [ ] `bastion_private_ip` description
+
 ## Before the on-site — questions to send the POC
 
 1. Workstation and connectivity: own laptop or a provided machine? Is outbound internet (GitHub, Helm/CNPG chart repos, pip) open from the office? Is bringing pre-prepared code fine?
@@ -464,8 +565,10 @@ Bastion and NAT were left running overnight 2026-10-12 → 13 (no destroy). End 
 - SSH login on GCP: metadata `ssh-keys` = `username:key`; the agent creates the user. → see Step 6.
 - `~>` version constraints: two numbers = minor may grow, three = patch only. → see Step 6.
 - Static vs ephemeral bastion IP, in one sentence. → see Step 6.
-- The K3s VM has no public IP. How do you SSH to it from the laptop in one command, without copying the private key to the bastion?
+- The K3s VM has no public IP. How do you SSH to it from the laptop in one command, without copying the private key to the bastion? → ProxyJump, see Step 7.
+- ProxyJump vs agent forwarding vs copying the key. → see Step 7.
+- "Suitable for future HA expansion?" The layer table and the no-teardown path. → see Step 7.
 
 ## Next
 
-Step 7 — Terraform: K3s VM (no public IP) + SSH ProxyJump config.
+Step 8 — Bastion tooling via startup script: kubectl, helm, cnpg plugin, python venv + psycopg.
