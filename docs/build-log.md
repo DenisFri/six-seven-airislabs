@@ -551,6 +551,146 @@ Commit: `git add terraform/ ; git commit -m "terraform: k3s vm, ssh proxyjump"`
 - [ ] `k3s.tf` + `outputs.tf` committed
 - [ ] `bastion_private_ip` description
 
+## Step 8 — Bastion tooling via startup script
+
+Goal: the bastion installs its own tools at boot (kubectl, helm, cnpg plugin, Python venv with psycopg). On site: zero manual typing; a rebuilt bastion comes back identical.
+
+`.gitattributes` (repo root) first. Git here has `core.autocrlf = true`, so every text file gets CRLF on checkout, and a `.sh` with CRLF dies on Linux with `\r: command not found`. One line forces LF for scripts, whatever the global setting:
+```
+*.sh text eol=lf
+```
+Check: `git check-attr eol -- terraform/bastion-startup.sh` → `eol: lf`. VS Code status bar must also say `LF` when saving.
+
+`terraform/bastion-startup.sh`:
+```bash
+#!/bin/bash
+# Bastion tooling. Runs as root on every boot, so every step must be safe to repeat.
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+# Right after boot, unattended-upgrades may hold the apt lock: wait instead of failing.
+apt-get -q -o DPkg::Lock::Timeout=120 update
+apt-get -q -o DPkg::Lock::Timeout=120 install -y python3 python3-venv
+
+# kubectl: upstream stable. Allowed skew to the k3s API server is one minor.
+KUBECTL_VERSION="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+chmod 0755 /usr/local/bin/kubectl
+
+# helm: official installer
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# cnpg kubectl plugin: cluster status, promote, reload
+curl -fsSL https://github.com/cloudnative-pg/cloudnative-pg/raw/main/hack/install-cnpg-plugin.sh | sh -s -- -b /usr/local/bin
+
+# Debian 12 refuses system-wide pip installs (PEP 668), so validate.py gets its own venv.
+python3 -m venv /opt/venv
+/opt/venv/bin/pip install -q "psycopg[binary]"
+```
+
+`bastion.tf`, one line in `metadata`:
+```hcl
+    startup-script = file("${path.module}/bastion-startup.sh")
+```
+Why the `metadata` key and not the `metadata_startup_script` argument: the argument **replaces** the VM on every script change (new ephemeral IP, SSH config edit). The key updates in place; the script runs at the next boot, or by hand: `sudo google_metadata_script_runner startup`. That command is also the on-site debug tool; its log: `sudo journalctl -u google-startup-scripts -n 30`.
+
+Commands: `terraform fmt; terraform validate; terraform plan` → **0 to add, 1 to change** → `apply` → `ssh six-seven-bastion "sudo google_metadata_script_runner startup"` (1–2 min) → verify:
+`ssh six-seven-bastion "kubectl version --client; helm version --short; kubectl cnpg version; /opt/venv/bin/python -c 'import psycopg; print(psycopg.__version__)'"`
+
+| What breaks | Cause |
+|---|---|
+| `\r: command not found` | CRLF: `.gitattributes` missing, or VS Code saved CRLF |
+| `externally-managed-environment` | pip outside a venv on Debian 12; that is why `/opt/venv` |
+| nothing installed after apply | metadata key runs at boot only: run the script runner, or reboot |
+| script stops halfway | `set -e`: the first failed download aborts; read journalctl |
+| apt lock held right after boot | `unattended-upgrades`; `-o DPkg::Lock::Timeout=120` waits instead of failing |
+| kubectl skew warning later | bastion kubectl more than one minor from the k3s API; pin `KUBECTL_VERSION` |
+| on site: GitHub/PyPI blocked | POC question 1; fallback `apt-get install python3-psycopg`, binaries carried in by hand |
+
+Commit: `git commit -m "terraform: bastion tooling startup script"` → `79f7e64`
+
+- [x] applied (`plan`: No changes)
+- [x] tools work: `kubectl get nodes` runs from the bastion (Step 9 proof; the four version lines were not pasted)
+- [x] committed
+
+## Step 9 — K3s install + kubeconfig on the bastion
+
+Goal: single-server k3s on the private VM, and `kubectl` on the bastion talking to it over the private network (6443, opened by the Step 4 rule). Flags checked against docs.k3s.io on 2026-10-14.
+
+`k3s/install-k3s.sh` (copied to the VM with scp, run there):
+```bash
+#!/bin/bash
+# Runs ON the k3s VM (copied there with scp). Single server, embedded SQLite.
+# Needs Cloud NAT: this VM has no public IP and get.k3s.io is on the internet.
+set -euo pipefail
+
+# The bastion talks to the API at this address, so the API certificate must carry it.
+# (k3s adds the node IP by itself; explicit means no surprise if the node ever has two.)
+NODE_IP="$(hostname -I | awk '{print $1}')"
+
+# --write-kubeconfig-mode 644  : fde can read the kubeconfig, needed for the copy to the bastion
+# --disable traefik, servicelb : no ingress, no LoadBalancer. Nothing listens on the node
+#                                except SSH and the API (6443). Postgres stays ClusterIP-only.
+curl -sfL https://get.k3s.io | sh -s - server \
+  --write-kubeconfig-mode 644 \
+  --tls-san "${NODE_IP}" \
+  --disable traefik \
+  --disable servicelb
+
+# The installer returns when the service starts, not when the API answers.
+until kubectl get nodes >/dev/null 2>&1; do sleep 2; done
+kubectl wait --for=condition=Ready node --all --timeout=120s
+kubectl get nodes -o wide
+```
+Flags: `--write-kubeconfig-mode 644` lets `fde` read `/etc/rancher/k3s/k3s.yaml` (default root-only, trap 5). `--tls-san <node ip>` puts the private IP in the API certificate. `--disable traefik --disable servicelb`: no ingress, no LoadBalancer; nothing listens on the node but SSH and 6443; Postgres stays ClusterIP-only, which is exactly what `validate.py` will assert. Datastore: embedded SQLite; `--cluster-init` converts to etcd in place when HA comes (Step 7 table). Version pin for the on-site: `INSTALL_K3S_VERSION=v1.36.5+k3s1` (what the stable channel gave today).
+
+`k3s/copy-kubeconfig.ps1` (laptop):
+```powershell
+# Runs on the laptop. Copies the k3s kubeconfig to the bastion, pointed at the node's
+# private IP instead of 127.0.0.1. The file is an admin credential: it passes through
+# $env:TEMP only because PowerShell pipes would re-encode it, and is deleted at the end.
+# Start ssh-agent first (Step 7), or every hop asks for the key passphrase.
+$k3sIp = terraform -chdir="$PSScriptRoot\..\terraform" output -raw k3s_private_ip
+$tmp   = Join-Path $env:TEMP "kubeconfig"
+
+ssh six-seven-k3s "sed 's/127.0.0.1/$k3sIp/' /etc/rancher/k3s/k3s.yaml > /tmp/kubeconfig"
+scp six-seven-k3s:/tmp/kubeconfig $tmp
+ssh six-seven-bastion "mkdir -p ~/.kube"
+scp $tmp six-seven-bastion:~/.kube/config
+ssh six-seven-bastion "chmod 600 ~/.kube/config; kubectl get nodes"
+
+ssh six-seven-k3s "rm -f /tmp/kubeconfig"
+Remove-Item $tmp
+```
+The kubeconfig is the cluster-admin credential. On the bastion it is `~/.kube/config`, mode 600; `kubeconfig*` is gitignored in case. Same pattern as docs.k3s.io: `scp` the file, `sed 's/127.0.0.1/<ip>/'`.
+
+Commands:
+```powershell
+scp .\k3s\install-k3s.sh six-seven-k3s:~/; ssh six-seven-k3s "bash ~/install-k3s.sh"
+.\k3s\copy-kubeconfig.ps1
+```
+
+Proof (printed from the bastion, 2026-10-14):
+```
+NAME            STATUS   ROLES           AGE   VERSION
+six-seven-k3s   Ready    control-plane   35s   v1.36.5+k3s1
+```
+
+| What breaks | Cause |
+|---|---|
+| install hangs on `curl get.k3s.io` | NAT off or wrong region (trap 1) |
+| `\r: command not found` | script copied with CRLF |
+| bastion: `connection refused 10.10.0.3:6443` | firewall rule without 6443, or kubeconfig still `127.0.0.1` |
+| bastion: permission denied on `k3s.yaml` | `--write-kubeconfig-mode 644` missing |
+| `x509: certificate is valid for ...` | kubeconfig points at an IP that is not in the cert SANs |
+| ten passphrase prompts | ssh-agent not running (Step 7 fix) |
+
+Commit: `git commit -m "k3s: install script and kubeconfig copy"` → `3e0380f`
+
+- [x] node Ready, `v1.36.5+k3s1`
+- [x] kubeconfig on the bastion, `kubectl get nodes` works there
+- [x] committed
+
 ## Before the on-site — questions to send the POC
 
 1. Workstation and connectivity: own laptop or a provided machine? Is outbound internet (GitHub, Helm/CNPG chart repos, pip) open from the office? Is bringing pre-prepared code fine?
@@ -568,7 +708,10 @@ Commit: `git add terraform/ ; git commit -m "terraform: k3s vm, ssh proxyjump"`
 - The K3s VM has no public IP. How do you SSH to it from the laptop in one command, without copying the private key to the bastion? → ProxyJump, see Step 7.
 - ProxyJump vs agent forwarding vs copying the key. → see Step 7.
 - "Suitable for future HA expansion?" The layer table and the no-teardown path. → see Step 7.
+- Startup script: `metadata` key (in place) vs `metadata_startup_script` (replaces the VM). → see Step 8.
+- Why `--disable traefik --disable servicelb`? Nothing listens on the node but SSH and 6443. → see Step 9.
+- Where the kubeconfig lives, why it is a secret, how it got to the bastion without the key leaving the laptop. → see Step 9.
 
 ## Next
 
-Step 8 — Bastion tooling via startup script: kubectl, helm, cnpg plugin, python venv + psycopg.
+Step 10 — Helm + CNPG operator in `cnpg-system` (pinned chart version).
