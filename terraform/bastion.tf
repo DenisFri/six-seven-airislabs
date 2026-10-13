@@ -27,6 +27,9 @@ resource "google_compute_instance" "bastion" {
   metadata = {
     ssh-keys               = "${var.ssh_user}:${trimspace(file(pathexpand(var.ssh_public_key_path)))}"
     block-project-ssh-keys = "true"
+    # Metadata key, not metadata_startup_script: that argument replaces the VM on every
+    # script change (new ephemeral IP). This updates in place and runs at the next boot.
+    startup-script = file("${path.module}/bastion-startup.sh")
   }
 
   shielded_instance_config {
