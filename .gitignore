@@ -5,3 +5,6 @@
 kubeconfig*
 __pycache__/
 .terraform.lock.hcl
+.venv/
+*.pem
+*.key

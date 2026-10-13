@@ -25,7 +25,8 @@ resource "google_compute_instance" "bastion" {
   }
 
   metadata = {
-    ssh-keys = "${var.ssh_user}:${trimspace(file(pathexpand(var.ssh_public_key_path)))}"
+    ssh-keys               = "${var.ssh_user}:${trimspace(file(pathexpand(var.ssh_public_key_path)))}"
+    block-project-ssh-keys = "true"
   }
 
   shielded_instance_config {
