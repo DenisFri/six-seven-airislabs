@@ -6,3 +6,8 @@ output "bastion_public_ip" {
 output "bastion_private_ip" {
   value = google_compute_instance.bastion.network_interface[0].network_ip
 }
+
+output "k3s_private_ip" {
+  description = "K3s node; reachable only through the bastion"
+  value       = google_compute_instance.k3s.network_interface[0].network_ip
+}
