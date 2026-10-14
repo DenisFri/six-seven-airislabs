@@ -37,6 +37,7 @@ Claude is the coach. Denis types the code and runs every command that changes th
 
 - Terraform cycle, in `terraform\`: `terraform fmt; terraform validate; terraform plan` → `terraform apply` → verify with gcloud → `git commit`
 - SSH: `$ip = terraform output -raw bastion_public_ip; ssh -i $HOME\.ssh\airis fde@$ip`
+- Scripted (same commands, ordered): `scripts\up.ps1 -ProjectId <id> [-From <phase>] [-Only <phase>]` · `scripts\down.ps1`
 - Slash commands: `/step` next step · `/log` docs + Obsidian · `/drill <area>` timed rebuild · `/chaos` break-and-fix · `/quiz` skeptical client · `/teardown` end of session
 
 ## Hard rules
