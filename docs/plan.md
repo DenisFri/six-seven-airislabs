@@ -16,10 +16,10 @@ Status: `done` · `in progress` · `next` · `todo`
 | 7 | K3s VM (no public IP) + `k3s_private_ip` output + SSH config with ProxyJump | done | `ssh six-seven-k3s` → hostname + NAT IP `34.165.222.20` (2026-10-13) |
 | 8 | Bastion tooling via startup script: kubectl, helm, python3, pip, psycopg, cnpg plugin | done | `kubectl get nodes` runs from the bastion (2026-10-14) |
 | 9 | K3s install over `ssh -J` + kubeconfig on the bastion | done | `six-seven-k3s Ready control-plane v1.36.5+k3s1` from the bastion (2026-10-14) |
-| 10 | Helm + CNPG operator in `cnpg-system` | in progress | operator pod Running |
-| 11 | Postgres `Cluster` `airis-core`, 2 instances | todo | `Cluster in healthy state` |
-| 12 | `validate.py` + `requirements.txt` + JSON report | todo | all checks PASS, exit 0 |
-| 13 | Demo flow, failure playbook, NAT-off demo, `terraform destroy` | todo | clean destroy |
+| 10 | Helm + CNPG operator in `cnpg-system` | done | committed `c385da2` (2026-10-14); pod-Running line not pasted |
+| 11 | Postgres `Cluster` `airis-core`, 2 instances | in progress | files written; run `deploy-airis-core.sh` → `Cluster in healthy state`, 2/2 |
+| 12 | `validate.py` + `requirements.txt` + JSON report | in progress | files written; `run-validate.ps1` → all PASS, exit 0 |
+| 13 | Demo flow, failure playbook, NAT-off demo, `terraform destroy` | in progress | `docs/demo.md` + `docs/failure-playbook.md` written; rehearsal + clean destroy pending |
 
 ## After the build
 
