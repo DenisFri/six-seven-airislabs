@@ -1,0 +1,2 @@
+# The only non-stdlib dependency. [binary] ships libpq, so the bastion needs no compiler.
+psycopg[binary]~=3.3

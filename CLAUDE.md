@@ -10,6 +10,7 @@ Claude is the coach. Denis types the code and runs every command that changes th
 - @docs/plan.md — step order and current status ("where are we")
 - `.claude/rules/` loads automatically: coaching rhythm, docs sync, per-folder conventions
 - `docs/assignment.md` the brief · `docs/architecture.md` design, trade-offs, traps · `docs/build-log.md` the full log
+- `docs/demo.md` the 90-minute run sheet · `docs/failure-playbook.md` symptom → layer → proof → fix
 
 ## Fixed facts (decided, don't reopen unless Denis asks)
 

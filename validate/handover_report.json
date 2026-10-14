@@ -1,0 +1,63 @@
+{
+  "timestamp": "2026-10-14T07:37:53+00:00",
+  "cluster": "airis-core/airis-core",
+  "passed": 11,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "Kubernetes API on the private IP",
+      "passed": true,
+      "evidence": "https://10.10.0.3:6443 readyz=ok"
+    },
+    {
+      "name": "Node Ready",
+      "passed": true,
+      "evidence": "1/1 Ready: six-seven-k3s"
+    },
+    {
+      "name": "CNPG operator available",
+      "passed": true,
+      "evidence": "available: cnpg-cloudnative-pg"
+    },
+    {
+      "name": "Cluster healthy",
+      "passed": true,
+      "evidence": "phase='Cluster in healthy state' ready=2/2 primary=airis-core-1"
+    },
+    {
+      "name": "Write/read round trip",
+      "passed": true,
+      "evidence": "insert + select of token 7c53e9f6... on the primary, scratch table dropped"
+    },
+    {
+      "name": "Streaming replication",
+      "passed": true,
+      "evidence": "1 standby streaming from the primary (expected >= 1)"
+    },
+    {
+      "name": "TLS on the connection",
+      "passed": true,
+      "evidence": "session encrypted with TLSv1.3"
+    },
+    {
+      "name": "Negative: node has no ExternalIP",
+      "passed": true,
+      "evidence": "no node advertises an ExternalIP"
+    },
+    {
+      "name": "Negative: direct 5432 to the node",
+      "passed": true,
+      "evidence": "10.10.0.3:5432 not reachable from the bastion (TimeoutError: timed out)"
+    },
+    {
+      "name": "Negative: no NodePort/LoadBalancer",
+      "passed": true,
+      "evidence": "7 services, none of type NodePort or LoadBalancer"
+    },
+    {
+      "name": "Chaos: delete primary, time failover",
+      "passed": true,
+      "evidence": "deleted airis-core-1; airis-core-2 promoted, cluster healthy again after 15s"
+    }
+  ]
+}
