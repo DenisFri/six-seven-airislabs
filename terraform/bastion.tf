@@ -21,7 +21,7 @@ resource "google_compute_instance" "bastion" {
 
   network_interface {
     subnetwork = google_compute_subnetwork.private.id
-    access_config {}
+    # No public IP. SSH arrives through IAP TCP forwarding; egress goes through NAT.
   }
 
   metadata = {

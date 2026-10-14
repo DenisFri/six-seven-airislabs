@@ -24,6 +24,7 @@ variable "subnet_cidr" {
 variable "mngmt_cidr" {
   description = "IP range of the management subnet"
   type        = string
+  default     = "35.235.240.0/20"
 }
 
 variable "enable_nat" {
@@ -41,5 +42,5 @@ variable "ssh_user" {
 variable "ssh_public_key_path" {
   description = "Public key allowed to log in (the private half never leaves the laptop)"
   type        = string
-  default     = "~/.ssh/airis.pub"
+  default     = "~/.ssh/df-airis.pub"
 }
