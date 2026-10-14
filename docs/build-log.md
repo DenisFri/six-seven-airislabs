@@ -829,10 +829,10 @@ Expected tail: `Status: Cluster in healthy state`, `Instances: 2`, `Ready instan
 | `max_connections: 100` rejected by the API | parameters are strings: quote the number |
 | `kubectl cnpg status` not found | Step 8 plugin missing on the bastion |
 
-Commit: `git add k3s/; git commit -m "k3s: airis-core postgres cluster"`
+Commit: `git add k3s/; git commit -m "k3s: airis-core postgres cluster"` → `49f483e`
 
-- [ ] applied, `Cluster in healthy state`, 2/2 ready
-- [ ] committed
+- [x] applied, `Cluster in healthy state`, 2/2 ready, primary `airis-core-1` (2026-10-14, from the handover report)
+- [x] committed
 
 ## Step 12 — `validate.py`: the handover artifact
 
@@ -867,11 +867,13 @@ Expected: 10 PASS lines (11 with `--chaos`), `10/10 checks passed`, exit code 0,
 | direct 5432 check FAIL ("accepted") | something listens on the node: `kubectl get svc -A`, `ss -lntp` on the node |
 | chaos: no new primary within 180 s | operator cannot recreate the pod (local-path on one node is fine; check events) |
 
-Commit: `git add validate/; git commit -m "validate: handover script"`
+Commit: `git add validate/; git commit -m "validate: handover script"` → `49f483e`
 
-- [ ] all checks PASS, exit 0
-- [ ] `--chaos` failover timed
-- [ ] committed
+Proof (`validate/handover_report.json`, 2026-10-14 07:37 UTC): **11/11 PASS**. API `https://10.10.0.3:6443`, node Ready, operator available, cluster healthy 2/2, round trip OK, 1 standby streaming, **TLSv1.3**, no ExternalIP, direct `10.10.0.3:5432` from the bastion **timed out** (firewall drop), 7 services all ClusterIP, chaos: `airis-core-1` deleted → `airis-core-2` promoted → healthy again after **15 s**.
+
+- [x] all checks PASS, exit 0
+- [x] `--chaos` failover timed: 15 s
+- [x] committed
 
 ## Step 13 — Demo flow, failure playbook, teardown
 
@@ -890,6 +892,55 @@ Both lists must come back empty. Cost of forgetting: two VMs + NAT ≈ 3 USD/day
 
 - [ ] demo flow rehearsed once end to end
 - [ ] `terraform destroy` clean (plan shows 10 to destroy)
+
+## Step 14 — On-site scripts: `scripts/up.ps1`, `scripts/down.ps1`
+
+Goal: on the company laptop, from `git clone` to a passing handover report with one command, and back to an empty project with another. Not magic: each phase is the same block of commands as `docs/demo.md`, in order, with waits where the cloud needs time, stopping at the first error. If the script dies, the phase name tells you where you are, and every phase is re-runnable (`-From <phase>`).
+
+How the repo gets there: `origin` is `github.com/DenisFri/six-seven-airislabs` and `main` is pushed, so `git clone` works from any machine with internet (POC question 1 covers "is GitHub reachable from the office"). Fallback: `git archive -o six-seven.zip HEAD` on a USB stick. Nothing secret is in the repo: `*.tfvars`, `*.tfstate*`, `kubeconfig*`, keys and now `tfplan` are ignored.
+
+`up.ps1` phases:
+
+| Phase | Does | Waits for / asks |
+|---|---|---|
+| prereqs | `Get-Command` gcloud, terraform, ssh, scp, ssh-keygen, curl.exe; prints versions | install hint: `winget install Google.CloudSDK Hashicorp.Terraform` |
+| gcloud | `auth login` if no active account, `config set project`, `auth application-default login` if no ADC, `services enable` (warns only: on a client project you may lack the permission) | two browser logins |
+| key | `ssh-keygen -t ed25519 -f ~/.ssh/airis` if missing; ssh-agent + `ssh-add` (warns if the service is disabled and you are not admin) | passphrase |
+| tfvars | writes `terraform.tfvars`: `project_id`, `mngmt_cidr` = `curl ifconfig.me`/32, `enable_nat = true`, optional `region`/`zone`; keeps an existing file | — |
+| terraform | `init`, `fmt`, `validate`, `plan -out=tfplan`, **asks**, `apply tfplan`, deletes `tfplan`, `output` | "Apply? y" (`-AutoApprove` skips) |
+| sshconfig | rewrites the two `Host six-seven-*` blocks in `~/.ssh/config` from the outputs (keeps other blocks), `StrictHostKeyChecking accept-new`, `ssh-keygen -R` both IPs, waits for sshd on both hops | up to 3 min |
+| tools | waits until the bastion's first-boot startup script has produced kubectl, helm and `import psycopg`; if not within 6 min runs `google_metadata_script_runner startup` by hand | up to 6 min |
+| k3s | `scp install-k3s.sh`, run it, `copy-kubeconfig.ps1` | ~1 min |
+| cnpg | `scp` values + `install-cnpg.sh`, run | ~1 min |
+| postgres | `scp` manifest + `deploy-airis-core.sh`, run, ends with `kubectl cnpg status` | 2–4 min |
+| validate | `run-validate.ps1`; report lands in `validate/handover_report.json` | — |
+
+`down.ps1`: reads both IPs from the outputs first (they vanish with the state), `terraform destroy` (terraform asks "yes"; `-AutoApprove` skips), then the proof: `gcloud compute instances list`, `routers list`, `networks list --filter=name=six-seven-vpc` must all be empty; then removes the `six-seven-*` SSH blocks and the two host keys. State, tfvars and the key stay.
+
+Why these choices: `plan -out` + a question instead of `apply -auto-approve`: the plan is shown and approved by a human, which is what the client expects to see; the plan file holds variable values, so it is deleted and gitignored. `accept-new` instead of `StrictHostKeyChecking no`: first contact is accepted, a changed key is still refused. `ssh-keygen -R` before connecting: a rebuilt VM gets a new host key behind the same private IP (`10.10.0.3` repeats on every build), otherwise ssh refuses with "REMOTE HOST IDENTIFICATION HAS CHANGED". Written for Windows PowerShell 5.1 (the default on any Windows laptop): no `&&`, no ternaries; `Run {}` turns a non-zero exit of a native command into a stop, because PowerShell does not do that by itself.
+
+Commands:
+```powershell
+.\scripts\up.ps1 -ProjectId <project-id>          # fresh laptop + fresh project
+.\scripts\up.ps1 -From k3s                        # after fixing a failed phase
+.\scripts\down.ps1                                # end of session
+```
+If PowerShell refuses to run scripts on the company laptop (policy `Restricted`): `powershell -ExecutionPolicy Bypass -File scripts\up.ps1 -ProjectId <id>`.
+
+| What breaks | Cause |
+|---|---|
+| "running scripts is disabled on this system" | execution policy; use `-ExecutionPolicy Bypass` |
+| gcloud phase loops on login | the browser session belongs to another Google account; use the one the client gave |
+| sshconfig: wait for the bastion times out | office egress IP ≠ `ifconfig.me` (NAT pool): ask for the office range, widen `mngmt_cidr`, `terraform apply` |
+| apply: `constraints/compute.vmExternalIpAccess` | org policy forbids public IPs: IAP fallback (open item) |
+| tools phase runs the startup script by hand | first boot was slow or a download failed; journal: `sudo journalctl -u google-startup-scripts` |
+| provided laptop is macOS/Linux | no PowerShell: type the phases from `docs/demo.md` |
+
+Commit: `git add .gitignore scripts/ README.md CLAUDE.md; git commit -m "scripts: up and down for the on-site"`
+
+- [ ] `up.ps1` run end to end against a destroyed project, time noted
+- [ ] `down.ps1` run, three empty lists
+- [ ] committed and pushed
 
 ## Before the on-site — questions to send the POC
 
@@ -915,7 +966,8 @@ Both lists must come back empty. Cost of forgetting: two VMs + NAT ≈ 3 USD/day
 - Requests vs limits, why no CPU limit, `shared_buffers` 25%, `preferred` vs `required` anti-affinity, how big is the DB. → see Step 11.
 - What the handover script proves and what it must *not* be able to do; why exit codes and JSON. → see Step 12.
 - CrashLoopBackOff: the four commands in order, and what each STATUS tells you about the layer. → `docs/failure-playbook.md`.
+- Why `plan -out` + a human "yes" instead of `-auto-approve`; why `accept-new`; why `ssh-keygen -R` before every connect. → see Step 14.
 
 ## Next
 
-Step 11 — apply `airis-core.yaml` from the bastion, paste `kubectl cnpg status`. Then Step 12 `run-validate.ps1`, Step 13 rehearsal + destroy.
+Step 14 rehearsal: `scripts\down.ps1`, then `scripts\up.ps1 -ProjectId airislabs-six-seven` end to end with a stopwatch, then `down.ps1` again. Fix whatever the run shows, commit, push. Then drills (`docs/plan.md`, "After the build").

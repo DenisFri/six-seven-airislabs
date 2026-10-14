@@ -17,9 +17,10 @@ Status: `done` · `in progress` · `next` · `todo`
 | 8 | Bastion tooling via startup script: kubectl, helm, python3, pip, psycopg, cnpg plugin | done | `kubectl get nodes` runs from the bastion (2026-10-14) |
 | 9 | K3s install over `ssh -J` + kubeconfig on the bastion | done | `six-seven-k3s Ready control-plane v1.36.5+k3s1` from the bastion (2026-10-14) |
 | 10 | Helm + CNPG operator in `cnpg-system` | done | committed `c385da2` (2026-10-14); pod-Running line not pasted |
-| 11 | Postgres `Cluster` `airis-core`, 2 instances | in progress | files written; run `deploy-airis-core.sh` → `Cluster in healthy state`, 2/2 |
-| 12 | `validate.py` + `requirements.txt` + JSON report | in progress | files written; `run-validate.ps1` → all PASS, exit 0 |
-| 13 | Demo flow, failure playbook, NAT-off demo, `terraform destroy` | in progress | `docs/demo.md` + `docs/failure-playbook.md` written; rehearsal + clean destroy pending |
+| 11 | Postgres `Cluster` `airis-core`, 2 instances | done | healthy 2/2, primary airis-core-1 (2026-10-14, `49f483e`) |
+| 12 | `validate.py` + `requirements.txt` + JSON report | done | 11/11 PASS incl. chaos failover 15 s (2026-10-14 07:37 UTC) |
+| 13 | Demo flow, failure playbook, NAT-off demo, `terraform destroy` | in progress | docs written; rehearsal + clean destroy pending |
+| 14 | On-site scripts `scripts/up.ps1` (11 phases, `-From`) + `scripts/down.ps1` (destroy + proof + ssh cleanup) | in progress | written, parsed on PS 5.1; end-to-end run against a destroyed project pending |
 
 ## After the build
 
