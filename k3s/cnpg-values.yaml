@@ -1,0 +1,14 @@
+# Helm values for the CloudNativePG operator (chart cloudnative-pg). Operator pod only:
+# the Postgres pods get their own requests in the Cluster manifest.
+replicaCount: 1
+
+# requests = what the scheduler reserves on the node; memory limit = the OOM ceiling.
+# No CPU limit on purpose: CPU throttling of the operator only slows failover.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# Day 2 (not now): monitoring.podMonitorEnabled: true once Prometheus exists.
